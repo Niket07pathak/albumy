@@ -6,7 +6,9 @@
     :license: MIT, see LICENSE for more details.
 """
 import os
-
+import random
+import requests
+import json
 from flask import render_template, flash, redirect, url_for, current_app, \
     send_from_directory, request, abort, Blueprint
 from flask_login import login_required, current_user
@@ -114,6 +116,56 @@ def get_avatar(filename):
     return send_from_directory(current_app.config['AVATARS_SAVE_PATH'], filename)
 
 
+def generate_alt_text(image_path):
+
+    # Read from JSON file
+    with open("azure_secrets.json", "r") as file:
+        secrets = json.load(file)
+
+    AZURE_ENDPOINT = secrets["AZURE_ENDPOINT"]
+    AZURE_API_KEY = secrets["AZURE_API_KEY"]
+
+    headers = {
+        'Ocp-Apim-Subscription-Key': AZURE_API_KEY,
+        'Content-Type': 'application/octet-stream'
+    }
+    params = {'visualFeatures': 'Description'}
+
+    with open(image_path, 'rb') as image_file:
+        response = requests.post(f"{AZURE_ENDPOINT}/vision/v3.2/analyze",
+                                 headers=headers, params=params, data=image_file)
+
+    if response.status_code == 200:
+        data = response.json()
+        return data['description']['captions'][0]['text'] if data['description'][
+            'captions'] else 'No description available.'
+    return 'Alt text generation failed.'
+
+
+def generate_tags(image_path):
+
+    with open("azure_secrets.json", "r") as file:
+        secrets = json.load(file)
+
+    AZURE_ENDPOINT = secrets["AZURE_ENDPOINT"]
+    AZURE_API_KEY = secrets["AZURE_API_KEY"]
+
+    headers = {
+        'Ocp-Apim-Subscription-Key': AZURE_API_KEY,
+        'Content-Type': 'application/octet-stream'
+    }
+    params = {'visualFeatures': 'Tags'}
+
+    with open(image_path, 'rb') as image_file:
+        response = requests.post(f"{AZURE_ENDPOINT}/vision/v3.2/analyze",
+                                 headers=headers, params=params, data=image_file)
+
+    if response.status_code == 200:
+        data = response.json()
+        # Extract tags from Azure response
+        tags = [tag['name'] for tag in data.get('tags', [])]
+        return tags
+    return []
 @main_bp.route('/upload', methods=['GET', 'POST'])
 @login_required
 @confirm_required
@@ -121,20 +173,94 @@ def get_avatar(filename):
 def upload():
     if request.method == 'POST' and 'file' in request.files:
         f = request.files.get('file')
-        filename = rename_image(f.filename)
+        randomInter = random.randint(1000, 99999)
+        filename = f"imgName{randomInter}.jpg"
+        filename_s = f"imgName{randomInter}.jpg"
+        filename_m = f"imgName{randomInter}.jpg"
+        #filename = rename_image(f.filename)
+        image_path=os.path.join(current_app.config['ALBUMY_UPLOAD_PATH'], filename)
         f.save(os.path.join(current_app.config['ALBUMY_UPLOAD_PATH'], filename))
-        filename_s = resize_image(f, filename, current_app.config['ALBUMY_PHOTO_SIZE']['small'])
-        filename_m = resize_image(f, filename, current_app.config['ALBUMY_PHOTO_SIZE']['medium'])
+
+        # filename_s = resize_image(f, filename, current_app.config['ALBUMY_PHOTO_SIZE']['small'])
+        # filename_m = resize_image(f, filename, current_app.config['ALBUMY_PHOTO_SIZE']['medium'])
+        alt_text = request.form.get('alt_text', '').strip()
+        if not alt_text:
+            alt_text = generate_alt_text(image_path)
+
+        print(alt_text)
+
         photo = Photo(
             filename=filename,
             filename_s=filename_s,
             filename_m=filename_m,
-            author=current_user._get_current_object()
+            author=current_user._get_current_object(),
+            description=alt_text
         )
         db.session.add(photo)
         db.session.commit()
-    return render_template('main/upload.html')
 
+        photo_id = photo.id
+        print(photo_id)
+        new_tag_auto(photo_id)
+    return render_template('main/upload.html')
+@main_bp.route('/photo/<int:photo_id>/tag/new_auto', methods=['POST'])
+@login_required
+
+
+def new_tag_auto(photo_id):
+    photo = Photo.query.get_or_404(photo_id)
+    print("hello")
+    # Generate tags via Azure API
+    image_path = os.path.join(current_app.config.get('ALBUMY_UPLOAD_PATH', ''), photo.filename)
+    generated_tags = generate_tags(image_path)
+
+    if generated_tags:
+        for name in generated_tags:
+            tag = Tag.query.filter_by(name=name).first()
+            print(tag)
+            if tag is None:
+                tag = Tag(name=name)
+                db.session.add(tag)
+                db.session.commit()
+            if tag not in photo.tags:
+                photo.tags.append(tag)
+                db.session.commit()
+
+        flash('Tags added via Azure.', 'success')
+    else:
+        flash('No tags generated or found.', 'error')
+
+    return redirect(url_for('.show_photo', photo_id=photo_id))
+
+# def new_tag_auto(photo_id):
+#     photo = db.session.query(Photo).get(photo_id) or abort(404)
+#
+#
+#     # No need for permission checks if called from upload()
+#
+#     # Call Azure API to generate tags for the photo
+#     image_path = current_app.config['MOMENTS_UPLOAD_PATH'] / photo.filename
+#     generated_tags = generate_tags(image_path)  # Fetch tags from Azure
+#
+#     if generated_tags:
+#         new_tags = []  # Collect new tag objects to add in batch
+#         for name in generated_tags:
+#             tag = db.session.scalar(select(Tag).filter_by(name=name))
+#             if tag is None:
+#                 tag = Tag(name=name)
+#                 db.session.add(tag)  # Add new tag to the session
+#                 new_tags.append(tag)
+#                 db.session.commit() # Store for later use
+#             if tag and tag not in photo.tags:
+#                 photo.tags.append(tag)
+#                 db.session.commit()
+#
+#           # Commit everything at once for efficiency
+#         flash('Tags added via Azure.', 'success')
+#     else:
+#         flash('No tags generated or found.', 'error')
+#
+#     return redirect(url_for('.show_photo', photo_id=photo_id))
 
 @main_bp.route('/photo/<int:photo_id>')
 def show_photo(photo_id):
@@ -148,7 +274,7 @@ def show_photo(photo_id):
     description_form = DescriptionForm()
     tag_form = TagForm()
 
-    description_form.description.data = photo.description
+
     return render_template('main/photo.html', photo=photo, comment_form=comment_form,
                            description_form=description_form, tag_form=tag_form,
                            pagination=pagination, comments=comments)

@@ -15,6 +15,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 
 from albumy.extensions import db, whooshee
 
+
 # relationship table
 roles_permissions = db.Table('roles_permissions',
                              db.Column('role_id', db.Integer, db.ForeignKey('role.id')),
@@ -234,7 +235,6 @@ class Photo(db.Model):
     can_comment = db.Column(db.Boolean, default=True)
     flag = db.Column(db.Integer, default=0)
     author_id = db.Column(db.Integer, db.ForeignKey('user.id'))
-
     author = db.relationship('User', back_populates='photos')
     comments = db.relationship('Comment', back_populates='photo', cascade='all')
     collectors = db.relationship('Collect', back_populates='collected', cascade='all')
