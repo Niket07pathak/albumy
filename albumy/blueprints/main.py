@@ -274,7 +274,7 @@ def show_photo(photo_id):
     description_form = DescriptionForm()
     tag_form = TagForm()
 
-
+    description_form.description.data = photo.description
     return render_template('main/photo.html', photo=photo, comment_form=comment_form,
                            description_form=description_form, tag_form=tag_form,
                            pagination=pagination, comments=comments)
