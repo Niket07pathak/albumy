@@ -42,3 +42,17 @@ Test account:
 
 This project is licensed under the MIT License (see the
 [LICENSE](LICENSE) file for details).
+
+## Setup Instructions for ML features
+
+If `requests` is not installed, you can install it separately:  
+```bash
+pip install requests
+```
+Create azure_secrets.json
+In the project root directory, create a file named azure_secrets.json and add the following fields:
+
+{
+    "AZURE_ENDPOINT": "your_azure_endpoint_here",
+    "AZURE_API_KEY": "your_azure_api_key_here"
+}
